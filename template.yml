@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  translate-all
+Transform:
+- AWS::Serverless-2016-10-31
+Parameters: 
+  NumberOfIteration: 
+    Type: Number
+    Default: 30
+    
+Globals:
+  Function:
+    Runtime: nodejs12.x
+    Timeout: 300
+    Handler: app.lambdaHandler
+    Tracing: Active
+    Environment:
+      Variables:
+        InputBucket: !Ref InputBucket
+        OutputBucket: !Ref OutputBucket
+Resources:
+  TranlateQueue:
+    Type: AWS::SQS::Queue
+  StartTranslateStateMachine:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: A Lambda function that logs the payload of messages sent to an associated SQS queue.
+      Runtime: nodejs12.x
+      CodeUri: src/start-translate-state-machine/
+      Events:
+        SQSQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt TranlateQueue.Arn
+      MemorySize: 128
+      Timeout: 25 # Chosen to be less than the default SQS Visibility Timeout of 30 seconds
+      Policies:
+        - AWSLambdaBasicExecutionRole  
+        - StepFunctionsExecutionPolicy:
+            StateMachineName:
+              !GetAtt TranslateStateMachine.Name
+      Environment:
+        Variables:
+          TranslateStateMachine: !Ref TranslateStateMachine
+
+  Iterator:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/iterator/
+      Policies: 
+        - AWSLambdaBasicExecutionRole
+ 
+  StartTranslateJob:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/start-translate-job/
+      Policies: 
+        - AWSLambdaBasicExecutionRole  
+        - arn:aws:iam::aws:policy/TranslateFullAccess
+        - Version: '2012-10-17' # Policy Document
+          Statement:
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt DataAccessRole.Arn   
+      Environment:
+        Variables:
+          DataAccessRoleArn: !GetAtt DataAccessRole.Arn   
+          
+  GetTextTranslationJob:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/get-translate-job/
+      Policies: 
+        - AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/TranslateFullAccess
+
+
+  DataAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - translate.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: 
+                  - !Sub "arn:aws:s3:::${InputBucket}/*"
+                  - !Sub "arn:aws:s3:::${OutputBucket}/*"
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: 
+                  - !GetAtt InputBucket.Arn
+                  - !GetAtt OutputBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: 
+                  - !Sub "arn:aws:s3:::${OutputBucket}/*"          
+              
+  TranslateStatesExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - !Sub states.${AWS::Region}.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: StatesExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sns:Publish"
+                Resource: 
+                  - !Ref TranslateCompletionSNSTopic
+              - Effect: Allow
+                Action:
+                  - "lambda:InvokeFunction"
+                Resource: 
+                  - !GetAtt [ StartTranslateJob, Arn ]
+                  - !GetAtt [ GetTextTranslationJob, Arn ]
+                  - !GetAtt [ Iterator, Arn ]
+      
+  TranslateCompletionSNSTopic:
+    Type: AWS::SNS::Topic
+      
+  TranslateStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      DefinitionString:
+        !Sub
+          - |-
+            {
+              "Comment": "Translate all documents State Machine",
+              "StartAt": "Start Translate Job",
+              "States": {
+                "Start Translate Job": {
+                  "Type": "Task",
+                  "Resource": "${StartTranslateJob}",
+                  "Next": "Configure Count",
+                  "Retry": [ {
+                      "ErrorEquals": [ "LimitExceededException", "ProvisionedThroughputExceededException"],
+                      "IntervalSeconds": 10,
+                      "BackoffRate": 2.0,
+                      "MaxAttempts": 3
+                  }]
+                },
+                "Configure Count": {
+                    "Type": "Pass",
+                    "InputPath": "$.JobId",
+                    "Result": {
+                        "count": ${NumberOfIteration},
+                        "index": 0,
+                        "step": 1
+                    },
+                    "ResultPath": "$.iterator",
+                    "Next": "Iterator"
+                  },
+                  "Iterator": {
+                      "Type": "Task",
+                      "Resource": "${Iterator}",
+                      "ResultPath": "$.iterator",
+                      "Next": "Is Count Reached Or Succeeded"
+                  },
+                  "Is Count Reached Or Succeeded": {
+                      "Type": "Choice",
+                      "Choices": [
+                          {
+                              "Variable": "$.iterator.continue",
+                              "BooleanEquals": true,
+                              "Next": "Get Translate Job"
+                          }
+                      ],
+                      "Default": "Finish Translate Job"
+                  },
+                  "Get Translate Job": {
+                      "Type": "Task",
+                      "Resource": "${GetTextTranslationJob}",
+                      "Next": "Wait 10 seconds"
+                  },
+                  "Wait 10 seconds": {
+                    "Type": "Wait",
+                    "Seconds": 10,
+                    "Next": "Iterator"
+                  },
+                  "Finish Translate Job": {
+                    "Type": "Pass",
+                    "OutputPath": "$.resultKey", 
+                    "Next": "Publish to SNS"
+                  }, 
+                  "Publish to SNS": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::sns:publish",
+                    "Parameters": {
+                     "TopicArn":"${TranslateCompletionSNSTopic}",
+                     "Message.$": "$"
+                    },
+                    "Next": "SuccessState"
+                   }, 
+                  "SuccessState": {
+                    "Type": "Succeed"
+                  }
+              }
+            }
+          - 
+            Iterator: !GetAtt [ Iterator, Arn ]
+            TranslateCompletionSNSTopic: !Ref TranslateCompletedTopic
+            StartTranslateJob: !GetAtt [ StartTranslateJob, Arn ]
+            GetTextTranslationJob: !GetAtt [ GetTextTranslationJob, Arn ]
+      RoleArn: !GetAtt [ TranslateStatesExecutionRole, Arn ]
+
+    
+  TranslateCompletedTopic:
+    Type: AWS::SNS::Topic
+      
+  InputBucket:
+    Type: AWS::S3::Bucket
+  
+  OutputBucket:
+    Type: AWS::S3::Bucket      
+
+Outputs:
+  TranslateCompletedTopic:
+    Description: Documents Set Translate Completion SNS Topic
+    Value: !Ref TranslateCompletedTopic  
+  InputBucket:
+    Description: Input Documents to be translated.
+    Value: !Ref InputBucket
+  OutputBucket:
+    Description: translated output Documents.
+    Value: !Ref OutputBucket    
