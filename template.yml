@@ -152,74 +152,112 @@ Resources:
           - |-
             {
               "Comment": "Translate all documents State Machine",
-              "StartAt": "Start Translate Job",
+              "StartAt": "Prepare File Types",
               "States": {
-                "Start Translate Job": {
-                  "Type": "Task",
-                  "Resource": "${StartTranslateJob}",
-                  "Next": "Configure Count",
-                  "Retry": [ {
-                      "ErrorEquals": [ "LimitExceededException", "ProvisionedThroughputExceededException"],
-                      "IntervalSeconds": 10,
-                      "BackoffRate": 2.0,
-                      "MaxAttempts": 3
-                  }]
+                "Prepare File Types": {
+                  "Type": "Pass",
+                  "Result": [
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                  "text/html",
+                  "text/plain"],
+                  "ResultPath": "$.contentTypes",
+                  "Next": "Translate All"
                 },
-                "Configure Count": {
-                    "Type": "Pass",
-                    "InputPath": "$.JobId",
-                    "Result": {
-                        "count": ${NumberOfIteration},
-                        "index": 0,
-                        "step": 1
-                    },
-                    "ResultPath": "$.iterator",
-                    "Next": "Iterator"
+                "Translate All": {
+                  "Type": "Map",
+                  "InputPath": "$",
+                  "ItemsPath": "$.contentTypes",
+                  "Parameters": {
+                    "JobName.$":  "$.JobName",
+                    "InputBucket.$":  "$.InputBucket",
+                    "InputS3Uri.$":  "$.InputS3Uri",
+                    "OutputBucket.$":  "$.OutputBucket",
+                    "SourceLanguageCode.$":  "$.SourceLanguageCode",
+                    "TargetLanguageCodes.$": "$.TargetLanguageCodes",
+                    "ContentType.$": "$$.Map.Item.Value"
                   },
+                  "MaxConcurrency": 0,
+                  "Next": "Finish All Translate Job",                  
                   "Iterator": {
-                      "Type": "Task",
-                      "Resource": "${Iterator}",
-                      "ResultPath": "$.iterator",
-                      "Next": "Is Count Reached Or Succeeded"
+                    "StartAt": "Start Translate Job",
+                    "States": {
+                      "Start Translate Job": {
+                        "Type": "Task",
+                        "Resource": "${StartTranslateJob}",
+                        "Next": "Configure Count",
+                        "Retry": [ {
+                            "ErrorEquals": [ "LimitExceededException", "ProvisionedThroughputExceededException"],
+                            "IntervalSeconds": 10,
+                            "BackoffRate": 2.0,
+                            "MaxAttempts": 3
+                        }]
+                      },
+                      "Configure Count": {
+                        "Type": "Pass",
+                        "InputPath": "$.JobId",
+                        "Result": {
+                            "count": ${NumberOfIteration},
+                            "index": 0,
+                            "step": 1
+                        },
+                        "ResultPath": "$.iterator",
+                        "Next": "Iterator"
+                      },
+                      "Iterator": {
+                          "Type": "Task",
+                          "Resource": "${Iterator}",
+                          "ResultPath": "$.iterator",
+                          "Next": "Is Count Reached Or Succeeded"
+                      },
+                      "Is Count Reached Or Succeeded": {
+                          "Type": "Choice",
+                          "Choices": [
+                              {
+                                  "Variable": "$.iterator.continue",
+                                  "BooleanEquals": true,
+                                  "Next": "Get Translate Job"
+                              }
+                          ],
+                          "Default": "Finish one type Translate Job"
+                      },
+                      "Get Translate Job": {
+                          "Type": "Task",
+                          "Resource": "${GetTextTranslationJob}",
+                          "Next": "Wait 10 seconds"
+                      },
+                      "Wait 10 seconds": {
+                        "Type": "Wait",
+                        "Seconds": 10,
+                        "Next": "Iterator"
+                      },
+                      "Finish one type Translate Job": {
+                        "Type": "Pass",
+                        "OutputPath": "$", 
+                        "End": true
+                      }
+                    }
                   },
-                  "Is Count Reached Or Succeeded": {
-                      "Type": "Choice",
-                      "Choices": [
-                          {
-                              "Variable": "$.iterator.continue",
-                              "BooleanEquals": true,
-                              "Next": "Get Translate Job"
-                          }
-                      ],
-                      "Default": "Finish Translate Job"
+                  "ResultPath": "$"
+                },
+                "Finish All Translate Job": {
+                  "Type": "Pass",
+                  "OutputPath": "$.", 
+                  "Next": "Publish to SNS"
+                }, 
+                "Publish to SNS": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::sns:publish",
+                  "Parameters": {
+                   "TopicArn":"${TranslateCompletionSNSTopic}",
+                   "Message.$": "$"
                   },
-                  "Get Translate Job": {
-                      "Type": "Task",
-                      "Resource": "${GetTextTranslationJob}",
-                      "Next": "Wait 10 seconds"
-                  },
-                  "Wait 10 seconds": {
-                    "Type": "Wait",
-                    "Seconds": 10,
-                    "Next": "Iterator"
-                  },
-                  "Finish Translate Job": {
-                    "Type": "Pass",
-                    "OutputPath": "$.resultKey", 
-                    "Next": "Publish to SNS"
-                  }, 
-                  "Publish to SNS": {
-                    "Type": "Task",
-                    "Resource": "arn:aws:states:::sns:publish",
-                    "Parameters": {
-                     "TopicArn":"${TranslateCompletionSNSTopic}",
-                     "Message.$": "$"
-                    },
-                    "Next": "SuccessState"
-                   }, 
-                  "SuccessState": {
-                    "Type": "Succeed"
-                  }
+                  "Next": "SuccessState"
+                 }, 
+                "SuccessState": {
+                  "Type": "Succeed"
+                }
               }
             }
           - 

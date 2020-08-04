@@ -1,17 +1,22 @@
 const AWS = require("aws-sdk");
-const crypto = require("crypto");
 const translate = new AWS.Translate();
 
 exports.lambdaHandler = async (event, context) => {
-  const bucket = process.env["InputBucket"];
   const key = event.srcKey;
 
+  let segments = event.ContentType.split(".");
+  let type = "";
+  if (segments > 0) {
+    type = segments[segments.length - 1];
+  } else {
+    segments = event.ContentType.split("/");
+    type = segments[segments.length - 1];
+  }
   const params = {
     DataAccessRoleArn: process.env.DataAccessRoleArn /* required */,
     InputDataConfig: {
       /* required */
-      ContentType:
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" /* required */,
+      ContentType: event.ContentType /* required */,
       S3Uri: "s3://" + event.InputBucket + "/" + event.InputS3Uri,
     },
     OutputDataConfig: {
@@ -19,7 +24,7 @@ exports.lambdaHandler = async (event, context) => {
     },
     SourceLanguageCode: event.SourceLanguageCode /* required */,
     TargetLanguageCodes: event.TargetLanguageCodes,
-    JobName: event.JobName,
+    JobName: event.JobName + "_" + type,
   };
   console.log(params);
   const result = await translate.startTextTranslationJob(params).promise();
