@@ -6,7 +6,7 @@ Transform:
 Parameters: 
   NumberOfIteration: 
     Type: Number
-    Default: 30
+    Default: 60
     
 Globals:
   Function:
@@ -57,6 +57,8 @@ Resources:
       Policies: 
         - AWSLambdaBasicExecutionRole  
         - arn:aws:iam::aws:policy/TranslateFullAccess
+        - S3WritePolicy:
+            BucketName: !Ref OutputBucket
         - Version: '2012-10-17' # Policy Document
           Statement:
             - Effect: Allow
@@ -75,6 +77,14 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - arn:aws:iam::aws:policy/TranslateFullAccess
 
+  CopyToTypeFolder:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/copy-to-type-folder/
+      Policies: 
+        - AWSLambdaBasicExecutionRole
+        - S3CrudPolicy:
+            BucketName: !Ref InputBucket
 
   DataAccessRole:
     Type: AWS::IAM::Role
@@ -140,6 +150,7 @@ Resources:
                   - !GetAtt [ StartTranslateJob, Arn ]
                   - !GetAtt [ GetTextTranslationJob, Arn ]
                   - !GetAtt [ Iterator, Arn ]
+                  - !GetAtt [ CopyToTypeFolder, Arn ]
       
   TranslateCompletionSNSTopic:
     Type: AWS::SNS::Topic
@@ -152,19 +163,13 @@ Resources:
           - |-
             {
               "Comment": "Translate all documents State Machine",
-              "StartAt": "Prepare File Types",
+              "StartAt": "Copy to Type Folder",
               "States": {
-                "Prepare File Types": {
-                  "Type": "Pass",
-                  "Result": [
-                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                  "text/html",
-                  "text/plain"],
-                  "ResultPath": "$.contentTypes",
-                  "Next": "Translate All"
-                },
+                "Copy to Type Folder": {
+                    "Type": "Task",
+                    "Resource": "${CopyToTypeFolder}",
+                    "Next": "Translate All"
+                }, 
                 "Translate All": {
                   "Type": "Map",
                   "InputPath": "$",
@@ -225,11 +230,11 @@ Resources:
                       "Get Translate Job": {
                           "Type": "Task",
                           "Resource": "${GetTextTranslationJob}",
-                          "Next": "Wait 10 seconds"
+                          "Next": "Wait 1 minute"
                       },
-                      "Wait 10 seconds": {
+                      "Wait 1 minute": {
                         "Type": "Wait",
-                        "Seconds": 10,
+                        "Seconds": 60,
                         "Next": "Iterator"
                       },
                       "Finish one type Translate Job": {
@@ -265,6 +270,7 @@ Resources:
             TranslateCompletionSNSTopic: !Ref TranslateCompletedTopic
             StartTranslateJob: !GetAtt [ StartTranslateJob, Arn ]
             GetTextTranslationJob: !GetAtt [ GetTextTranslationJob, Arn ]
+            CopyToTypeFolder: !GetAtt [ CopyToTypeFolder, Arn ]
       RoleArn: !GetAtt [ TranslateStatesExecutionRole, Arn ]
 
     

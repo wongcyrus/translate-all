@@ -7,5 +7,5 @@ s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1mhzjm1gn6clf"
 s3_prefix = "translate-all"
 region = "us-east-1"
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "NumberOfIteration=\"30\""
+parameter_overrides = "NumberOfIteration=\"60\""
 
