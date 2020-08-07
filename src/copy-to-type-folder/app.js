@@ -15,8 +15,8 @@ exports.lambdaHandler = async (event, context) => {
 
   const mapping = {
     ".txt": "/plain/",
-    ".xml": "/html/",
-    ".html ": "/html/",
+    ".xml": "/web/",
+    ".html ": "/web/",
     ".docx": "/document/",
     ".pptx": "/presentation/",
     ".xlsx": "/sheet/",

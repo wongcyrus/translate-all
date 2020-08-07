@@ -86,6 +86,22 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref InputBucket
 
+  CopyToParentFolder:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/copy-to-parent-folder/
+      Policies: 
+        - AWSLambdaBasicExecutionRole
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - Statement:    
+          - Effect: Allow
+            Action:
+              - s3:GetObjectTagging
+              - s3:PutObjectTagging
+            Resource: 
+              - !Sub "arn:aws:s3:::${OutputBucket}/*"     
+            
   DataAccessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -140,7 +156,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - "sns:Publish"
+                  - "SNS:Publish"
                 Resource: 
                   - !Ref TranslateCompletionSNSTopic
               - Effect: Allow
@@ -151,7 +167,8 @@ Resources:
                   - !GetAtt [ GetTextTranslationJob, Arn ]
                   - !GetAtt [ Iterator, Arn ]
                   - !GetAtt [ CopyToTypeFolder, Arn ]
-      
+                  - !GetAtt [ CopyToParentFolder, Arn ]
+           
   TranslateCompletionSNSTopic:
     Type: AWS::SNS::Topic
       
@@ -184,7 +201,7 @@ Resources:
                     "ContentType.$": "$$.Map.Item.Value"
                   },
                   "MaxConcurrency": 0,
-                  "Next": "Finish All Translate Job",                  
+                  "Next": "Copy to Parent Folder",                  
                   "Iterator": {
                     "StartAt": "Start Translate Job",
                     "States": {
@@ -201,7 +218,7 @@ Resources:
                       },
                       "Configure Count": {
                         "Type": "Pass",
-                        "InputPath": "$.JobId",
+                        "InputPath": "$",
                         "Result": {
                             "count": ${NumberOfIteration},
                             "index": 0,
@@ -246,16 +263,21 @@ Resources:
                   },
                   "ResultPath": "$"
                 },
+                "Copy to Parent Folder": {
+                    "Type": "Task",
+                    "Resource": "${CopyToParentFolder}",
+                    "Next": "Finish All Translate Job"
+                }, 
                 "Finish All Translate Job": {
                   "Type": "Pass",
-                  "OutputPath": "$.", 
+                  "OutputPath": "$", 
                   "Next": "Publish to SNS"
                 }, 
                 "Publish to SNS": {
                   "Type": "Task",
                   "Resource": "arn:aws:states:::sns:publish",
                   "Parameters": {
-                   "TopicArn":"${TranslateCompletionSNSTopic}",
+                   "TopicArn":"${TranslateCompletedTopic}",
                    "Message.$": "$"
                   },
                   "Next": "SuccessState"
@@ -267,10 +289,11 @@ Resources:
             }
           - 
             Iterator: !GetAtt [ Iterator, Arn ]
-            TranslateCompletionSNSTopic: !Ref TranslateCompletedTopic
             StartTranslateJob: !GetAtt [ StartTranslateJob, Arn ]
             GetTextTranslationJob: !GetAtt [ GetTextTranslationJob, Arn ]
             CopyToTypeFolder: !GetAtt [ CopyToTypeFolder, Arn ]
+            CopyToParentFolder: !GetAtt [ CopyToParentFolder, Arn ]
+            TranslateCompletedTopic: !Ref TranslateCompletedTopic            
       RoleArn: !GetAtt [ TranslateStatesExecutionRole, Arn ]
 
     

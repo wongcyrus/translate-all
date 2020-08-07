@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "start-translate-job",
   "main": "app.js",
-  "repository": "https://github.com/wongcyrus/DocumentsSetTextract/tree/master/documents-set-textract",
+  "repository": "https://github.com/wongcyrus/translate-all",
   "author": "SAM CLI",
   "license": "MIT",
   "dependencies": {}

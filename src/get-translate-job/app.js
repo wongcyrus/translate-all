@@ -12,7 +12,7 @@ exports.lambdaHandler = async (event, context) => {
   console.log(job);
 
   if (job.TextTranslationJobProperties.JobStatus === "COMPLETED") {
-    event.resultKey = { Bucket: event.srcBucket };
+    event.iterator.continue = false;
   }
   event.JobStatus = job.TextTranslationJobProperties.JobStatus;
   event.JobName = job.TextTranslationJobProperties.JobName;

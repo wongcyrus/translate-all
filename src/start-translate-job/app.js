@@ -42,7 +42,8 @@ exports.lambdaHandler = async (event, context) => {
   const result = await translate.startTextTranslationJob(params).promise();
   console.log(result);
 
-  params.JobId = result.key;
+  params.JobId = result.JobId;
   params.JobStatus = result.JobStatus;
+  delete params.DataAccessRoleArn;
   return params;
 };
