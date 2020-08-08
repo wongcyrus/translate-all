@@ -4,14 +4,14 @@ const s3 = new AWS.S3();
 
 exports.lambdaHandler = async (event, context) => {
   const mapping = {
-    "text/plain": "/plain/",
-    "text/html": "/html/",
+    "text/plain": "/!!plain!!/",
+    "text/html": "/!!html!!/",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-      "/document/",
+      "/!!document!!/",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-      "/presentation/",
+      "/!!presentation!!/",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-      "/sheet/",
+      "/!!sheet!!/",
   };
   const folder = mapping[event.ContentType];
 
@@ -44,6 +44,7 @@ exports.lambdaHandler = async (event, context) => {
 
   params.JobId = result.JobId;
   params.JobStatus = result.JobStatus;
+  params.Id = event.JobName;
   delete params.DataAccessRoleArn;
   return params;
 };

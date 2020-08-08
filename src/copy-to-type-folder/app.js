@@ -4,27 +4,26 @@ const path = require("path");
 const s3 = new AWS.S3();
 
 exports.lambdaHandler = async (event, context) => {
-  //event.InputBucket + "/" + event.InputS3Uri
-
   const params = {
     Bucket: event.InputBucket /* required */,
     Prefix: event.InputS3Uri,
   };
   const allKeys = [];
   await getAllKeys(params, allKeys);
+  console.log(allKeys);
 
   const mapping = {
-    ".txt": "/plain/",
-    ".xml": "/web/",
-    ".html ": "/web/",
-    ".docx": "/document/",
-    ".pptx": "/presentation/",
-    ".xlsx": "/sheet/",
+    ".txt": "/!!plain!!/",
+    ".xml": "/!!html!!/",
+    ".html": "/!!html!!/",
+    ".docx": "/!!document!!/",
+    ".pptx": "/!!presentation!!/",
+    ".xlsx": "/!!sheet!!/",
   };
   const mappingContenType = {
     ".txt": "text/plain",
     ".xml": "text/html",
-    ".html ": "text/html",
+    ".html": "text/html",
     ".docx":
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx":
@@ -49,12 +48,26 @@ exports.lambdaHandler = async (event, context) => {
         console.log(params);
         await s3.deleteObjects(params).promise();
       }
+      const getDistKey = (key, value) => {
+        const dirPath = path.dirname(key); //  test/folder
+        const fileName = path.basename(key); //  demo.txt
+
+        const hasSubFolder = dirPath.replace(event.InputS3Uri, "").length > 0;
+        const translateDir = event.InputS3Uri + value;
+        if (hasSubFolder) {
+          const flattenSubDir = dirPath
+            .replace(event.InputS3Uri, "")
+            .split("/")
+            .join("-_ForwardSlash_-");
+          return translateDir + flattenSubDir + "-_ForwardSlash_-" + fileName;
+        } else return translateDir + fileName;
+      };
 
       const keys = allKeys
         .filter((c) => c.endsWith(key) && !c.includes(value))
         .map((c) => ({
           srcKey: c,
-          distKey: path.dirname(c) + value + path.basename(c),
+          distKey: getDistKey(c, value),
         }));
 
       console.log(keys);

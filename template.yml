@@ -7,6 +7,21 @@ Parameters:
   NumberOfIteration: 
     Type: Number
     Default: 60
+  ConcurrentTranslateJob:
+    Type: Number
+    Default: 5       
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: Translate-All
+    Description: Enable Amazon Translate to translate all supporting documents file in one folder.
+    Author: Cyrus Wong
+    SpdxLicenseId: MIT
+    LicenseUrl: LICENSE.txt
+    ReadmeUrl: README.md
+    Labels: ['Tranlate']
+    HomePageUrl: https://github.com/wongcyrus/translate-all
+    SemanticVersion: 1.0.0
+    SourceCodeUrl: https://github.com/wongcyrus/translate-all
     
 Globals:
   Function:
@@ -21,6 +36,7 @@ Globals:
 Resources:
   TranlateQueue:
     Type: AWS::SQS::Queue
+    
   StartTranslateStateMachine:
     Type: AWS::Serverless::Function
     Properties:
@@ -189,9 +205,11 @@ Resources:
                 }, 
                 "Translate All": {
                   "Type": "Map",
+                  "MaxConcurrency": ${ConcurrentTranslateJob},
                   "InputPath": "$",
                   "ItemsPath": "$.contentTypes",
                   "Parameters": {
+                    "Id.$":  "$.JobName",
                     "JobName.$":  "$.JobName",
                     "InputBucket.$":  "$.InputBucket",
                     "InputS3Uri.$":  "$.InputS3Uri",
@@ -247,11 +265,11 @@ Resources:
                       "Get Translate Job": {
                           "Type": "Task",
                           "Resource": "${GetTextTranslationJob}",
-                          "Next": "Wait 1 minute"
+                          "Next": "Wait 3 minute"
                       },
-                      "Wait 1 minute": {
+                      "Wait 3 minute": {
                         "Type": "Wait",
-                        "Seconds": 60,
+                        "Seconds": 180,
                         "Next": "Iterator"
                       },
                       "Finish one type Translate Job": {
@@ -277,7 +295,7 @@ Resources:
                   "Type": "Task",
                   "Resource": "arn:aws:states:::sns:publish",
                   "Parameters": {
-                   "TopicArn":"${TranslateCompletedTopic}",
+                   "TopicArn":"${TranslateCompletionSNSTopic}",
                    "Message.$": "$"
                   },
                   "Next": "SuccessState"
@@ -293,13 +311,11 @@ Resources:
             GetTextTranslationJob: !GetAtt [ GetTextTranslationJob, Arn ]
             CopyToTypeFolder: !GetAtt [ CopyToTypeFolder, Arn ]
             CopyToParentFolder: !GetAtt [ CopyToParentFolder, Arn ]
-            TranslateCompletedTopic: !Ref TranslateCompletedTopic            
+            TranslateCompletionSNSTopic: !Ref TranslateCompletionSNSTopic       
+            ConcurrentTranslateJob: !Ref ConcurrentTranslateJob
       RoleArn: !GetAtt [ TranslateStatesExecutionRole, Arn ]
 
-    
-  TranslateCompletedTopic:
-    Type: AWS::SNS::Topic
-      
+
   InputBucket:
     Type: AWS::S3::Bucket
   
@@ -307,9 +323,12 @@ Resources:
     Type: AWS::S3::Bucket      
 
 Outputs:
-  TranslateCompletedTopic:
+  TranlateQueue:
+    Description: Tranlate Job Queue
+    Value: !Ref TranlateQueue
+  TranslateCompletionSNSTopic:
     Description: Documents Set Translate Completion SNS Topic
-    Value: !Ref TranslateCompletedTopic  
+    Value: !Ref TranslateCompletionSNSTopic  
   InputBucket:
     Description: Input Documents to be translated.
     Value: !Ref InputBucket

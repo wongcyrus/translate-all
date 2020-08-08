@@ -1,4 +1,5 @@
 const AWS = require("aws-sdk");
+const path = require("path");
 
 const s3 = new AWS.S3();
 
@@ -19,21 +20,19 @@ exports.lambdaHandler = async (event, context) => {
   };
 
   const folderMapping = {
-    "text/plain": "/plain/",
-    "text/html": "/web/",
+    "text/plain": "/!!plain!!/",
+    "text/html": "/!!html!!/",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-      "/document/",
+      "/!!document!!/",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-      "/presentation/",
+      "/!!presentation!!/",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-      "/sheet/",
+      "/!!sheet!!/",
   };
 
   const awsAccountId = context.invokedFunctionArn.split(":")[4];
   const distKeys = await Promise.all(
     await event.map(async (job) => {
-      //111964674713-TranslateText-fb1cf4633d3597bcc07c88a90233dbf0
-      //"s3://translate-all-documents-outputbucket-uqy3mw10t859/test/plain/"
       const resultFolder =
         job.OutputDataConfig.S3Uri +
         awsAccountId +
@@ -64,7 +63,21 @@ exports.lambdaHandler = async (event, context) => {
       const copy = async (key) => {
         const fileName = key.replace(resultFolder, "");
         console.log(jobFolder);
-        const distKey = fileName.replace(jobFolder, "").replace(folder, "");
+
+        let distKey = fileName.replace(jobFolder, "").replace(folder, "");
+
+        if (distKey.includes("-_ForwardSlash_-")) {
+          const LanguageCodePrefix = job.TargetLanguageCodes + ".";
+          distKey = distKey.replace(
+            LanguageCodePrefix + "-_ForwardSlash_-",
+            ""
+          );
+          distKey = distKey.split("-_ForwardSlash_-").join("/");
+          const dirPath = path.dirname(distKey); //  test/folder
+          const fileName = path.basename(distKey); //  demo.txt
+          distKey = dirPath + "/" + LanguageCodePrefix + fileName;
+        }
+
         await s3
           .copyObject({
             Bucket: outputBucket,
@@ -75,14 +88,24 @@ exports.lambdaHandler = async (event, context) => {
         return distKey;
       };
 
-      return await Promise.all(
+      const movedKeys = await Promise.all(
         await translatedFileKeys.map(async (c) => await copy(c))
       );
+
+      return movedKeys.map((key) => ({
+        Bucket: outputBucket,
+        Key: key,
+        resultUrl: s3.getSignedUrl("getObject", {
+          Bucket: outputBucket,
+          Key: key,
+          Expires: 86400, //7 days
+        }),
+      }));
     })
   );
   console.log(distKeys);
 
-  return event;
+  return { jobName: event[0].Id, message: distKeys };
 };
 const getAllKeys = async (params, allKeys = []) => {
   const response = await s3.listObjectsV2(params).promise();
