@@ -81,7 +81,7 @@ exports.lambdaHandler = async (event, context) => {
         await s3
           .copyObject({
             Bucket: outputBucket,
-            CopySource: outputBucket + "/" + key,
+            CopySource: encodeURIComponent(outputBucket + "/" + key),
             Key: distKey,
           })
           .promise();
@@ -103,9 +103,9 @@ exports.lambdaHandler = async (event, context) => {
       }));
     })
   );
-  console.log(distKeys);
+  console.log(distKeys.flat(1));
 
-  return { jobName: event[0].Id, message: distKeys };
+  return { jobName: event[0].Id, files: distKeys.flat(1) };
 };
 const getAllKeys = async (params, allKeys = []) => {
   const response = await s3.listObjectsV2(params).promise();

@@ -101,6 +101,13 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - S3CrudPolicy:
             BucketName: !Ref InputBucket
+        - Statement:    
+          - Effect: Allow
+            Action:
+              - s3:GetObjectTagging
+              - s3:PutObjectTagging
+            Resource: 
+              - !Sub "arn:aws:s3:::${InputBucket}/*"                
 
   CopyToParentFolder:
     Type: AWS::Serverless::Function
@@ -153,6 +160,7 @@ Resources:
                 Resource: 
                   - !Sub "arn:aws:s3:::${OutputBucket}/*"          
               
+
   TranslateStatesExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -315,7 +323,6 @@ Resources:
             ConcurrentTranslateJob: !Ref ConcurrentTranslateJob
       RoleArn: !GetAtt [ TranslateStatesExecutionRole, Arn ]
 
-
   InputBucket:
     Type: AWS::S3::Bucket
   
@@ -323,9 +330,9 @@ Resources:
     Type: AWS::S3::Bucket      
 
 Outputs:
-  TranlateQueue:
+  TranlateQueueArn:
     Description: Tranlate Job Queue
-    Value: !Ref TranlateQueue
+    Value: !GetAtt [ TranlateQueue, Arn ]
   TranslateCompletionSNSTopic:
     Description: Documents Set Translate Completion SNS Topic
     Value: !Ref TranslateCompletionSNSTopic  

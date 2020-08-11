@@ -76,7 +76,9 @@ exports.lambdaHandler = async (event, context) => {
         await s3
           .copyObject({
             Bucket: event.InputBucket,
-            CopySource: event.InputBucket + "/" + keyPair.srcKey,
+            CopySource: encodeURIComponent(
+              event.InputBucket + "/" + keyPair.srcKey
+            ),
             Key: keyPair.distKey,
           })
           .promise();
