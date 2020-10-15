@@ -7,9 +7,6 @@ Parameters:
   NumberOfIteration: 
     Type: Number
     Default: 60
-  ConcurrentTranslateJob:
-    Type: Number
-    Default: 5       
 Metadata:
   AWS::ServerlessRepo::Application:
     Name: Translate-All
@@ -18,7 +15,7 @@ Metadata:
     SpdxLicenseId: MIT
     LicenseUrl: LICENSE.txt
     ReadmeUrl: README.md
-    Labels: ['Tranlate']
+    Labels: ['AmazonTranslate']
     HomePageUrl: https://github.com/wongcyrus/translate-all
     SemanticVersion: 1.0.0
     SourceCodeUrl: https://github.com/wongcyrus/translate-all
@@ -197,131 +194,18 @@ Resources:
     Type: AWS::SNS::Topic
       
   TranslateStateMachine:
-    Type: AWS::StepFunctions::StateMachine
+    Type: AWS::Serverless::StateMachine
     Properties:
-      DefinitionString:
-        !Sub
-          - |-
-            {
-              "Comment": "Translate all documents State Machine",
-              "StartAt": "Copy to Type Folder",
-              "States": {
-                "Copy to Type Folder": {
-                    "Type": "Task",
-                    "Resource": "${CopyToTypeFolder}",
-                    "Next": "Translate All"
-                }, 
-                "Translate All": {
-                  "Type": "Map",
-                  "MaxConcurrency": ${ConcurrentTranslateJob},
-                  "InputPath": "$",
-                  "ItemsPath": "$.contentTypes",
-                  "Parameters": {
-                    "Id.$":  "$.JobName",
-                    "JobName.$":  "$.JobName",
-                    "InputBucket.$":  "$.InputBucket",
-                    "InputS3Uri.$":  "$.InputS3Uri",
-                    "OutputBucket.$":  "$.OutputBucket",
-                    "SourceLanguageCode.$":  "$.SourceLanguageCode",
-                    "TargetLanguageCodes.$": "$.TargetLanguageCodes",
-                    "ContentType.$": "$$.Map.Item.Value"
-                  },
-                  "MaxConcurrency": 0,
-                  "Next": "Copy to Parent Folder",                  
-                  "Iterator": {
-                    "StartAt": "Start Translate Job",
-                    "States": {
-                      "Start Translate Job": {
-                        "Type": "Task",
-                        "Resource": "${StartTranslateJob}",
-                        "Next": "Configure Count",
-                        "Retry": [ {
-                            "ErrorEquals": [ "LimitExceededException", "ProvisionedThroughputExceededException"],
-                            "IntervalSeconds": 10,
-                            "BackoffRate": 2.0,
-                            "MaxAttempts": 3
-                        }]
-                      },
-                      "Configure Count": {
-                        "Type": "Pass",
-                        "InputPath": "$",
-                        "Result": {
-                            "count": ${NumberOfIteration},
-                            "index": 0,
-                            "step": 1
-                        },
-                        "ResultPath": "$.iterator",
-                        "Next": "Iterator"
-                      },
-                      "Iterator": {
-                          "Type": "Task",
-                          "Resource": "${Iterator}",
-                          "ResultPath": "$.iterator",
-                          "Next": "Is Count Reached Or Succeeded"
-                      },
-                      "Is Count Reached Or Succeeded": {
-                          "Type": "Choice",
-                          "Choices": [
-                              {
-                                  "Variable": "$.iterator.continue",
-                                  "BooleanEquals": true,
-                                  "Next": "Get Translate Job"
-                              }
-                          ],
-                          "Default": "Finish one type Translate Job"
-                      },
-                      "Get Translate Job": {
-                          "Type": "Task",
-                          "Resource": "${GetTextTranslationJob}",
-                          "Next": "Wait 3 minute"
-                      },
-                      "Wait 3 minute": {
-                        "Type": "Wait",
-                        "Seconds": 180,
-                        "Next": "Iterator"
-                      },
-                      "Finish one type Translate Job": {
-                        "Type": "Pass",
-                        "OutputPath": "$", 
-                        "End": true
-                      }
-                    }
-                  },
-                  "ResultPath": "$"
-                },
-                "Copy to Parent Folder": {
-                    "Type": "Task",
-                    "Resource": "${CopyToParentFolder}",
-                    "Next": "Finish All Translate Job"
-                }, 
-                "Finish All Translate Job": {
-                  "Type": "Pass",
-                  "OutputPath": "$", 
-                  "Next": "Publish to SNS"
-                }, 
-                "Publish to SNS": {
-                  "Type": "Task",
-                  "Resource": "arn:aws:states:::sns:publish",
-                  "Parameters": {
-                   "TopicArn":"${TranslateCompletionSNSTopic}",
-                   "Message.$": "$"
-                  },
-                  "Next": "SuccessState"
-                 }, 
-                "SuccessState": {
-                  "Type": "Succeed"
-                }
-              }
-            }
-          - 
-            Iterator: !GetAtt [ Iterator, Arn ]
-            StartTranslateJob: !GetAtt [ StartTranslateJob, Arn ]
-            GetTextTranslationJob: !GetAtt [ GetTextTranslationJob, Arn ]
-            CopyToTypeFolder: !GetAtt [ CopyToTypeFolder, Arn ]
-            CopyToParentFolder: !GetAtt [ CopyToParentFolder, Arn ]
-            TranslateCompletionSNSTopic: !Ref TranslateCompletionSNSTopic       
-            ConcurrentTranslateJob: !Ref ConcurrentTranslateJob
-      RoleArn: !GetAtt [ TranslateStatesExecutionRole, Arn ]
+      DefinitionUri: statemachine/translate.asl.json
+      DefinitionSubstitutions:
+          Iterator: !GetAtt [ Iterator, Arn ]
+          StartTranslateJob: !GetAtt [ StartTranslateJob, Arn ]
+          GetTextTranslationJob: !GetAtt [ GetTextTranslationJob, Arn ]
+          CopyToTypeFolder: !GetAtt [ CopyToTypeFolder, Arn ]
+          CopyToParentFolder: !GetAtt [ CopyToParentFolder, Arn ]
+          TranslateCompletionSNSTopic: !Ref TranslateCompletionSNSTopic
+          NumberOfIteration: !Ref NumberOfIteration
+      Role: !GetAtt [ TranslateStatesExecutionRole, Arn ]
 
   InputBucket:
     Type: AWS::S3::Bucket
